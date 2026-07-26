@@ -28,15 +28,91 @@ headers_api = {
     "X-RapidAPI-Host": "free-api-live-football-data.p.rapidapi.com"
 }
 
-def estimar_probabilidade_vitoria(time_casa, time_fora):
-    prob_calculada = 0.85
-    favorito = time_casa
-    return favorito, prob_calculada
+# --- FUNÇÃO DE ANÁLISE ESTATÍSTICA REAL ---
+def calcular_desempenho_time(time_id):
+    """
+    Busca as últimas partidas do time na API para calcular a taxa real de vitórias recentes.
+    """
+    if not time_id:
+        return 0.50
 
+    url_historico = f"https://free-api-live-football-data.p.rapidapi.com/football-get-team-all-matches?teamid={time_id}"
+    
+    try:
+        response = requests.get(url_historico, headers=headers_api, timeout=8)
+        if response.status_code != 200:
+            return 0.50
+            
+        dados = response.json()
+        
+        # Tenta capturar a lista de partidas do time
+        response_obj = dados.get("response", {})
+        jogos = response_obj.get("matches", []) if isinstance(response_obj, dict) else []
+        
+        # Pega no máximo os últimos 5 jogos
+        jogos_recentes = jogos[:5]
+        
+        if not jogos_recentes:
+            return 0.50
+
+        vitorias = 0
+        total_jogos = 0
+
+        for jogo in jogos_recentes:
+            status_info = jogo.get("status", {})
+            if isinstance(status_info, dict):
+                status_str = str(status_info.get("reason", {}).get("short", "")).lower() or str(status_info.get("type", "")).lower()
+            else:
+                status_str = str(status_info).lower()
+
+            # Pega apenas jogos já encerrados
+            if any(termo in status_str for termo in ["finished", "ft", "ended"]):
+                total_jogos += 1
+                home_obj = jogo.get("home", {})
+                away_obj = jogo.get("away", {})
+                
+                gols_casa = home_obj.get("score", 0) if isinstance(home_obj, dict) else 0
+                gols_fora = away_obj.get("score", 0) if isinstance(away_obj, dict) else 0
+                
+                eh_mandante = (isinstance(home_obj, dict) and str(home_obj.get("id")) == str(time_id))
+                
+                if eh_mandante and gols_casa > gols_fora:
+                    vitorias += 1
+                elif not eh_mandante and gols_fora > gols_casa:
+                    vitorias += 1
+
+        return (vitorias / total_jogos) if total_jogos > 0 else 0.50
+
+    except Exception:
+        return 0.50
+
+def estimar_probabilidade_vitoria(time_casa_id, time_fora_id, nome_casa, nome_fora):
+    """
+    Compara o aproveitamento real dos dois times para calcular quem é o favorito.
+    """
+    taxa_casa = calcular_desempenho_time(time_casa_id)
+    taxa_fora = calcular_desempenho_time(time_fora_id)
+
+    # Bônus leve de mandante (+5% de vantagem para o time da casa)
+    taxa_casa_ajustada = taxa_casa + 0.05
+
+    total = taxa_casa_ajustada + taxa_fora
+    if total == 0:
+        return nome_casa, 0.50
+
+    prob_casa = taxa_casa_ajustada / total
+    prob_fora = taxa_fora / total
+
+    if prob_casa >= prob_fora:
+        return nome_casa, prob_casa
+    else:
+        return nome_fora, prob_fora
+
+# --- BUSCA E ENVIO DE SINAIS ---
 async def buscar_e_enviar_sinais(context: ContextTypes.DEFAULT_TYPE, data_str: str, rotulo_data: str):
     await context.bot.send_message(
         chat_id=CHAT_ID, 
-        text=f"🔎 Buscando partidas de futebol agendadas para {rotulo_data} ({data_str})..."
+        text=f"🔎 Buscando e analisando partidas de futebol para {rotulo_data} ({data_str})..."
     )
 
     url_fixtures = f"https://free-api-live-football-data.p.rapidapi.com/football-get-matches-by-date?date={data_str}"
@@ -83,35 +159,38 @@ async def buscar_e_enviar_sinais(context: ContextTypes.DEFAULT_TYPE, data_str: s
     for partida in jogos_encontrados:
         jogos_processados += 1
 
-        # Trata o status do jogo sem travar o processamento
+        # Tratamento de status
         status_info = partida.get("status", {})
-        
-        # Verifica se o status é dicionário ou string
         if isinstance(status_info, dict):
             status_str = str(status_info.get("reason", {}).get("short", "")).lower() or str(status_info.get("type", "")).lower()
         else:
             status_str = str(status_info).lower()
 
-        # Ignora se explicitamente finalizado ou cancelado
+        # Descarta partidas finalizadas ou canceladas
         if any(termo in status_str for termo in ["finished", "ft", "ended", "canceled", "postponed"]):
             continue
 
-        home_obj = partida.get("home", {})
-        away_obj = partida.get("away", {})
+        home_obj = partida.get("home", {}) if isinstance(partida.get("home"), dict) else {}
+        away_obj = partida.get("away", {}) if isinstance(partida.get("away"), dict) else {}
         
-        time_casa = home_obj.get("name", "Time Casa") if isinstance(home_obj, dict) else "Time Casa"
-        time_fora = away_obj.get("name", "Time Fora") if isinstance(away_obj, dict) else "Time Fora"
+        time_casa_id = home_obj.get("id")
+        time_fora_id = away_obj.get("id")
+        
+        time_casa = home_obj.get("name", "Time Casa")
+        time_fora = away_obj.get("name", "Time Fora")
+        
         nome_liga = partida.get("leagueName", partida.get("league", {}).get("name", "Liga Geral"))
-        
-        # Horário do jogo
-        time_obj = partida.get("status", {}).get("startTime") if isinstance(partida.get("status"), dict) else None
         horario_jogo = partida.get("time", "Horário a definir")
 
-        favorito, prob_estimada = estimar_probabilidade_vitoria(time_casa, time_fora)
+        # Chama o cálculo real baseado no histórico
+        favorito, prob_estimada = estimar_probabilidade_vitoria(
+            time_casa_id, time_fora_id, time_casa, time_fora
+        )
 
         odd_mercado = 1.22 
         prob_implicita = 1 / odd_mercado
 
+        # Filtro rigoroso: apenas probabilidades reais > 80%
         if prob_estimada > 0.80 and prob_estimada > prob_implicita:
             sinais_encontrados += 1
             mensagem = (
@@ -119,10 +198,10 @@ async def buscar_e_enviar_sinais(context: ContextTypes.DEFAULT_TYPE, data_str: s
                 f"🏆 *Competição:* {nome_liga}\n"
                 f"⏰ *Horário:* {horario_jogo}\n"
                 f"⚽ *Jogo:* {time_casa} x {time_fora}\n"
-                f"⭐️ *Favorito:* {favorito}\n"
-                f"📈 *Probabilidade Estimada:* {prob_estimada * 100:.1f}%\n"
+                f"⭐️ *Favorito Estimado:* {favorito}\n"
+                f"📈 *Probabilidade Real Estimada:* {prob_estimada * 100:.1f}%\n"
                 f"📊 *Odd do Mercado:* {odd_mercado:.2f} (Implícita: {prob_implicita * 100:.1f}%)\n\n"
-                f"✅ *Critério:* Taxa de vitória +80% e valor sobre a odd do mercado."
+                f"✅ *Critério:* Desempenho recente verificado (+80% de probabilidade real)."
             )
             await context.bot.send_message(
                 chat_id=CHAT_ID, 
@@ -133,7 +212,7 @@ async def buscar_e_enviar_sinais(context: ContextTypes.DEFAULT_TYPE, data_str: s
     if sinais_encontrados == 0:
         await context.bot.send_message(
             chat_id=CHAT_ID, 
-            text=f"Análise concluída em {jogos_processados} jogos ({rotulo_data}). Nenhum sinal atendeu aos critérios."
+            text=f"Análise concluída em {jogos_processados} jogos ({rotulo_data}). Nenhum jogo pendente atendeu aos critérios de +80% de probabilidade real."
         )
 
 # --- COMANDOS DO TELEGRAM ---
