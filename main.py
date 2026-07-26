@@ -39,61 +39,46 @@ async def consultar(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text="🔎 Buscando partidas de futebol de hoje..."
     )
 
-    # Tenta primeiro no formato AAAAMMDD ou YYYY-MM-DD, e depois DD/MM/YYYY se falhar
-    hoje_iso = datetime.now().strftime("%Y-%m-%d")
-    hoje_br = datetime.now().strftime("%d/%m/%Y")
-    
-    url_fixtures = f"https://free-api-live-football-data.p.rapidapi.com/football-get-matches-by-date?date={hoje_br}"
+    hoje_formatado = datetime.now().strftime("%Y%m%d") # Formato AAAAMMDD nativo da API
+    url_fixtures = f"https://free-api-live-football-data.p.rapidapi.com/football-get-matches-by-date?date={hoje_formatado}"
     
     try:
-        response = requests.get(url_fixtures, headers=headers_api, timeout=10)
-        
-        if response.status_code != 200:
-            await context.bot.send_message(
-                chat_id=CHAT_ID, 
-                text=f"🚨 ERRO DA API (Código {response.status_code}):\n{response.text[:300]}"
-            )
-            return
-
+        response = requests.get(url_fixtures, headers=headers_api, timeout=12)
         data = response.json()
         jogos_encontrados = []
-        
-        # Extração genérica para capturar a lista onde quer que esteja
-        if isinstance(data, dict):
-            resp = data.get("response", data.get("data", {}))
+
+        # Se o formato AAAAMMDD retornar status ok
+        if isinstance(data, dict) and data.get("status") == "success":
+            resp = data.get("response", {})
             if isinstance(resp, list):
                 jogos_encontrados = resp
             elif isinstance(resp, dict):
-                for k, v in resp.items():
-                    if isinstance(v, list) and len(v) > 0:
-                        jogos_encontrados = v
-                        break
+                jogos_encontrados = resp.get("matches", resp.get("list", []))
 
-        # Se não achou partidas no formato BR, tenta formato ISO
+        # Se falhou, tenta o formato YYYY-MM-DD
         if not jogos_encontrados:
-            url_fixtures_iso = f"https://free-api-live-football-data.p.rapidapi.com/football-get-matches-by-date?date={hoje_iso}"
-            response_iso = requests.get(url_fixtures_iso, headers=headers_api, timeout=10)
-            if response_iso.status_code == 200:
-                data_iso = response_iso.json()
-                if isinstance(data_iso, dict):
-                    resp = data_iso.get("response", data_iso.get("data", {}))
-                    if isinstance(resp, list):
-                        jogos_encontrados = resp
-                    elif isinstance(resp, dict):
-                        for k, v in resp.items():
-                            if isinstance(v, list) and len(v) > 0:
-                                jogos_encontrados = v
-                                break
+            hoje_iso = datetime.now().strftime("%Y-%m-%d")
+            url_iso = f"https://free-api-live-football-data.p.rapidapi.com/football-get-matches-by-date?date={hoje_iso}"
+            res_iso = requests.get(url_iso, headers=headers_api, timeout=12)
+            data_iso = res_iso.json()
+            
+            if isinstance(data_iso, dict):
+                resp = data_iso.get("response", {})
+                if isinstance(resp, list):
+                    jogos_encontrados = resp
+                elif isinstance(resp, dict):
+                    jogos_encontrados = resp.get("matches", resp.get("list", []))
 
         if not jogos_encontrados:
+            msg_erro = data.get("message", "Sem jogos retornados no momento.") if isinstance(data, dict) else "Servidor instável."
             await context.bot.send_message(
                 chat_id=CHAT_ID, 
-                text=f"⚠️ Nenhuma partida no retorno da API.\nResposta parcial: {str(data)[:250]}"
+                text=f"⚠️ A API de futebol está instável no momento.\nMensagem: {msg_erro}\n\nTente novamente em instantes enviando /consultar."
             )
             return
 
     except Exception as e:
-        await context.bot.send_message(chat_id=CHAT_ID, text=f"❌ Erro na requisição Python: {str(e)}")
+        await context.bot.send_message(chat_id=CHAT_ID, text=f"❌ Erro de conexão Python: {str(e)}")
         return
 
     sinais_encontrados = 0
