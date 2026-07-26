@@ -45,7 +45,16 @@ async def consultar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         response = requests.get(url_fixtures, headers=headers_api)
         data = response.json()
-        jogos_encontrados = data.get("response", [])
+        
+        # Correção da leitura do JSON da API
+        resp_data = data.get("response", {})
+        if isinstance(resp_data, list):
+            jogos_encontrados = resp_data
+        elif isinstance(resp_data, dict):
+            jogos_encontrados = resp_data.get("matches", resp_data.get("list", []))
+        else:
+            jogos_encontrados = []
+            
     except Exception as e:
         await context.bot.send_message(chat_id=CHAT_ID, text="❌ Erro ao consultar a API de futebol.")
         return
@@ -56,9 +65,14 @@ async def consultar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for partida in jogos_encontrados:
         jogos_processados += 1
 
-        time_casa = partida.get("teams", {}).get("home", {}).get("name", "Time Casa")
-        time_fora = partida.get("teams", {}).get("away", {}).get("name", "Time Fora")
-        nome_liga = partida.get("league", {}).get("name", "Liga Geral")
+        # Extração flexível dos times e liga
+        home_obj = partida.get("home", partida.get("teams", {}).get("home", {}))
+        away_obj = partida.get("away", partida.get("teams", {}).get("away", {}))
+        league_obj = partida.get("league", {})
+
+        time_casa = home_obj.get("name", "Time Casa") if isinstance(home_obj, dict) else "Time Casa"
+        time_fora = away_obj.get("name", "Time Fora") if isinstance(away_obj, dict) else "Time Fora"
+        nome_liga = league_obj.get("name", "Liga Geral") if isinstance(league_obj, dict) else "Liga Geral"
         
         favorito, prob_estimada = estimar_probabilidade_vitoria(time_casa, time_fora)
 
