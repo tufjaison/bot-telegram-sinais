@@ -53,7 +53,6 @@ async def consultar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     sinais_encontrados = 0
     jogos_processados = 0
 
-    # Analisa TODOS os jogos do dia, sem restrição de ligas
     for partida in jogos_encontrados:
         jogos_processados += 1
 
@@ -87,26 +86,6 @@ async def consultar(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_message(
             chat_id=CHAT_ID, 
             text=f"Análise concluída em {jogos_processados} jogos de todas as ligas do dia. Nenhuma oportunidade com +80% e EV+ encontrada."
-        )
-
-def main():
-    server_thread = Thread(target=run_web_server)
-    server_thread.daemon = True
-    server_thread.start()
-
-    app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
-    app.add_handler(CommandHandler("consultar", consultar))
-    print("Bot rodando com sucesso...")
-    app.run_polling()
-
-if __name__ == "__main__":
-    main()
-                )
-
-    if sinais_encontrados == 0:
-        await context.bot.send_message(
-            chat_id=CHAT_ID, 
-            text=f"Análise concluída em {jogos_processados} jogos. Nenhuma oportunidade com +80% e EV+ encontrada."
         )
 
 def main():
