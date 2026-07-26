@@ -2,6 +2,7 @@ import os
 import requests
 from threading import Thread
 from flask import Flask
+from datetime import datetime
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
@@ -25,29 +26,30 @@ headers_api = {
 }
 
 async def consultar(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Testando o endpoint alternativo sem necessidade de passar parâmetro de data
-    url_teste = "https://free-api-live-football-data.p.rapidapi.com/football-current-matches"
+    agora = datetime.now()
     
-    try:
-        res = requests.get(url_teste, headers=headers_api, timeout=10)
-        
-        msg_debug = (
-            f"🔍 *TESTE ENDPOINT ALTERNATIVO*\n"
-            f"• **Status Code:** {res.status_code}\n\n"
-            f"• **Resposta:**\n```json\n{res.text[:1000]}\n```"
-        )
-        
-        await context.bot.send_message(
-            chat_id=CHAT_ID, 
-            text=msg_debug, 
-            parse_mode="Markdown"
-        )
+    # Formatos de data para testar
+    formatos = {
+        "BR (DD/MM/YYYY)": agora.strftime("%d/%m/%Y"),
+        "Compacto (YYYYMMDD)": agora.strftime("%Y%m%d"),
+        "ISO (YYYY-MM-DD)": agora.strftime("%Y-%m-%d")
+    }
+    
+    relatorio = ["🔍 **TESTE DE FORMATOS DE DATA**\n"]
 
-    except Exception as e:
-        await context.bot.send_message(
-            chat_id=CHAT_ID, 
-            text=f"❌ Erro ao conectar: {str(e)}"
-        )
+    for nome, data_str in formatos.items():
+        url = f"https://free-api-live-football-data.p.rapidapi.com/football-get-matches-by-date?date={data_str}"
+        try:
+            res = requests.get(url, headers=headers_api, timeout=10)
+            relatorio.append(f"📌 **Format:** {nome} (`{data_str}`)\n• Status: {res.status_code}\n• Retorno: `{res.text[:120]}`\n")
+        except Exception as e:
+            relatorio.append(f"📌 **Format:** {nome}\n• Erro: {str(e)}\n")
+
+    await context.bot.send_message(
+        chat_id=CHAT_ID, 
+        text="\n".join(relatorio), 
+        parse_mode="Markdown"
+    )
 
 def main():
     server_thread = Thread(target=run_web_server)
