@@ -23,8 +23,6 @@ CHAT_ID = "-1004348164311"
 
 RAPIDAPI_KEY = "da8f4c8adamsh028fa7a3a2166f7p1e958ejsnff73e59f7c30"
 
-LIGAS_ALVO = [71, 39, 140, 135, 78, 61, 2, 3, 848, 128, 253, 94] 
-
 headers_api = {
     "X-RapidAPI-Key": RAPIDAPI_KEY,
     "X-RapidAPI-Host": "free-api-live-football-data.p.rapidapi.com"
@@ -38,7 +36,7 @@ def estimar_probabilidade_vitoria(time_casa, time_fora):
 async def consultar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_message(
         chat_id=CHAT_ID, 
-        text="🔎 Buscando partidas das 12 ligas e analisando oportunidades..."
+        text="🔎 Buscando partidas de TODAS as ligas disponíveis hoje e analisando oportunidades..."
     )
 
     hoje = datetime.now().strftime("%Y-%m-%d")
@@ -55,34 +53,54 @@ async def consultar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     sinais_encontrados = 0
     jogos_processados = 0
 
+    # Analisa TODOS os jogos do dia, sem restrição de ligas
     for partida in jogos_encontrados:
-        liga_id = partida.get("league", {}).get("id")
+        jogos_processados += 1
+
+        time_casa = partida.get("teams", {}).get("home", {}).get("name", "Time Casa")
+        time_fora = partida.get("teams", {}).get("away", {}).get("name", "Time Fora")
+        nome_liga = partida.get("league", {}).get("name", "Liga Geral")
         
-        if liga_id in LIGAS_ALVO:
-            jogos_processados += 1
+        favorito, prob_estimada = estimar_probabilidade_vitoria(time_casa, time_fora)
 
-            time_casa = partida.get("teams", {}).get("home", {}).get("name", "Time Casa")
-            time_fora = partida.get("teams", {}).get("away", {}).get("name", "Time Fora")
-            
-            favorito, prob_estimada = estimar_probabilidade_vitoria(time_casa, time_fora)
+        odd_mercado = 1.22 
+        prob_implicita = 1 / odd_mercado
 
-            odd_mercado = 1.22 
-            prob_implicita = 1 / odd_mercado
+        if prob_estimada > 0.80 and prob_estimada > prob_implicita:
+            sinais_encontrados += 1
+            mensagem = (
+                f"🎯 *SINAL DE APOSTA IDENTIFICADO*\n\n"
+                f"🏆 *Competição:* {nome_liga}\n"
+                f"⚽ *Jogo:* {time_casa} x {time_fora}\n"
+                f"⭐️ *Favorito:* {favorito}\n"
+                f"📈 *Probabilidade Estimada:* {prob_estimada * 100:.1f}%\n"
+                f"📊 *Odd do Mercado:* {odd_mercado:.2f} (Implícita: {prob_implicita * 100:.1f}%)\n\n"
+                f"✅ *Critério:* Taxa de vitória +80% e valor sobre a odd do mercado."
+            )
+            await context.bot.send_message(
+                chat_id=CHAT_ID, 
+                text=mensagem, 
+                parse_mode="Markdown"
+            )
 
-            if prob_estimada > 0.80 and prob_estimada > prob_implicita:
-                sinais_encontrados += 1
-                mensagem = (
-                    f"🎯 *SINAL DE APOSTA IDENTIFICADO*\n\n"
-                    f"⚽ *Jogo:* {time_casa} x {time_fora}\n"
-                    f"🏆 *Favorito:* {favorito}\n"
-                    f"📈 *Probabilidade Estimada:* {prob_estimada * 100:.1f}%\n"
-                    f"📊 *Odd do Mercado:* {odd_mercado:.2f} (Implícita: {prob_implicita * 100:.1f}%)\n\n"
-                    f"✅ *Critério:* Taxa de vitória +80% e valor sobre a odd do mercado."
-                )
-                await context.bot.send_message(
-                    chat_id=CHAT_ID, 
-                    text=mensagem, 
-                    parse_mode="Markdown"
+    if sinais_encontrados == 0:
+        await context.bot.send_message(
+            chat_id=CHAT_ID, 
+            text=f"Análise concluída em {jogos_processados} jogos de todas as ligas do dia. Nenhuma oportunidade com +80% e EV+ encontrada."
+        )
+
+def main():
+    server_thread = Thread(target=run_web_server)
+    server_thread.daemon = True
+    server_thread.start()
+
+    app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
+    app.add_handler(CommandHandler("consultar", consultar))
+    print("Bot rodando com sucesso...")
+    app.run_polling()
+
+if __name__ == "__main__":
+    main()
                 )
 
     if sinais_encontrados == 0:
