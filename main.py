@@ -39,9 +39,11 @@ async def consultar(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text="🔎 Buscando partidas de futebol de hoje..."
     )
 
-    hoje = datetime.now().strftime("%Y-%m-%d")
-    # URL corrigida com o endpoint correto da RapidAPI
-    url_fixtures = f"https://free-api-live-football-data.p.rapidapi.com/football-get-matches-by-date?date={hoje}"
+    # Tenta primeiro no formato AAAAMMDD ou YYYY-MM-DD, e depois DD/MM/YYYY se falhar
+    hoje_iso = datetime.now().strftime("%Y-%m-%d")
+    hoje_br = datetime.now().strftime("%d/%m/%Y")
+    
+    url_fixtures = f"https://free-api-live-football-data.p.rapidapi.com/football-get-matches-by-date?date={hoje_br}"
     
     try:
         response = requests.get(url_fixtures, headers=headers_api, timeout=10)
@@ -54,22 +56,39 @@ async def consultar(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         data = response.json()
-        
-        # Extrai a lista de jogos do formato nativo da API
         jogos_encontrados = []
+        
+        # Extração genérica para capturar a lista onde quer que esteja
         if isinstance(data, dict):
-            status_api = data.get("status")
-            resp = data.get("response", {})
-            
-            if isinstance(resp, dict):
-                jogos_encontrados = resp.get("matches", resp.get("list", []))
-            elif isinstance(resp, list):
+            resp = data.get("response", data.get("data", {}))
+            if isinstance(resp, list):
                 jogos_encontrados = resp
+            elif isinstance(resp, dict):
+                for k, v in resp.items():
+                    if isinstance(v, list) and len(v) > 0:
+                        jogos_encontrados = v
+                        break
+
+        # Se não achou partidas no formato BR, tenta formato ISO
+        if not jogos_encontrados:
+            url_fixtures_iso = f"https://free-api-live-football-data.p.rapidapi.com/football-get-matches-by-date?date={hoje_iso}"
+            response_iso = requests.get(url_fixtures_iso, headers=headers_api, timeout=10)
+            if response_iso.status_code == 200:
+                data_iso = response_iso.json()
+                if isinstance(data_iso, dict):
+                    resp = data_iso.get("response", data_iso.get("data", {}))
+                    if isinstance(resp, list):
+                        jogos_encontrados = resp
+                    elif isinstance(resp, dict):
+                        for k, v in resp.items():
+                            if isinstance(v, list) and len(v) > 0:
+                                jogos_encontrados = v
+                                break
 
         if not jogos_encontrados:
             await context.bot.send_message(
                 chat_id=CHAT_ID, 
-                text=f"⚠️ Nenhuma partida encontrada para a data de hoje ({hoje})."
+                text=f"⚠️ Nenhuma partida no retorno da API.\nResposta parcial: {str(data)[:250]}"
             )
             return
 
@@ -131,4 +150,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-    
