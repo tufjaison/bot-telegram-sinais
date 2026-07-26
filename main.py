@@ -83,9 +83,17 @@ async def buscar_e_enviar_sinais(context: ContextTypes.DEFAULT_TYPE, data_str: s
     for partida in jogos_encontrados:
         jogos_processados += 1
 
-        # Filtra partidas já finalizadas ou canceladas
-        status_partida = str(partida.get("status", "")).lower()
-        if any(termo in status_partida for termo in ["finished", "ft", "ended", "cancel", "postponed"]):
+        # Trata o status do jogo sem travar o processamento
+        status_info = partida.get("status", {})
+        
+        # Verifica se o status é dicionário ou string
+        if isinstance(status_info, dict):
+            status_str = str(status_info.get("reason", {}).get("short", "")).lower() or str(status_info.get("type", "")).lower()
+        else:
+            status_str = str(status_info).lower()
+
+        # Ignora se explicitamente finalizado ou cancelado
+        if any(termo in status_str for termo in ["finished", "ft", "ended", "canceled", "postponed"]):
             continue
 
         home_obj = partida.get("home", {})
@@ -94,8 +102,11 @@ async def buscar_e_enviar_sinais(context: ContextTypes.DEFAULT_TYPE, data_str: s
         time_casa = home_obj.get("name", "Time Casa") if isinstance(home_obj, dict) else "Time Casa"
         time_fora = away_obj.get("name", "Time Fora") if isinstance(away_obj, dict) else "Time Fora"
         nome_liga = partida.get("leagueName", partida.get("league", {}).get("name", "Liga Geral"))
-        horario_jogo = partida.get("time", "Horário a definir")
         
+        # Horário do jogo
+        time_obj = partida.get("status", {}).get("startTime") if isinstance(partida.get("status"), dict) else None
+        horario_jogo = partida.get("time", "Horário a definir")
+
         favorito, prob_estimada = estimar_probabilidade_vitoria(time_casa, time_fora)
 
         odd_mercado = 1.22 
@@ -122,7 +133,7 @@ async def buscar_e_enviar_sinais(context: ContextTypes.DEFAULT_TYPE, data_str: s
     if sinais_encontrados == 0:
         await context.bot.send_message(
             chat_id=CHAT_ID, 
-            text=f"Análise concluída em {jogos_processados} jogos ({rotulo_data}). Nenhum jogo pendente com oportunidade +80% EV+ encontrada."
+            text=f"Análise concluída em {jogos_processados} jogos ({rotulo_data}). Nenhum sinal atendeu aos critérios."
         )
 
 # --- COMANDOS DO TELEGRAM ---
@@ -141,7 +152,6 @@ def main():
 
     app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
     
-    # Registra os dois comandos
     app.add_handler(CommandHandler("consultar", consultar))
     app.add_handler(CommandHandler("amanha", amanha))
     
