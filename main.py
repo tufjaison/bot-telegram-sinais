@@ -22,7 +22,7 @@ def run_web_server():
 TELEGRAM_BOT_TOKEN = "8841800451:AAE_4-wSQ8LDY-uJH9s09uulW8S9_DDvSlo"
 CHAT_ID = "-1004348164311"
 
-RAPIDAPI_KEY = "da8f4c8adamsh028fa7a3a2166f7p1e958ejsnff73e59f7c30"
+RAPIDAPI_KEY = "d473e6bd9amsh975ef6df91017dap1b8259jsn7bad65cc2295"
 
 headers_api = {
     "X-RapidAPI-Key": RAPIDAPI_KEY,
