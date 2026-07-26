@@ -2,7 +2,7 @@ import os
 import requests
 from threading import Thread
 from flask import Flask
-from datetime import datetime
+from datetime import datetime, timedelta
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
@@ -29,20 +29,17 @@ headers_api = {
 }
 
 def estimar_probabilidade_vitoria(time_casa, time_fora):
-    # Lógica de estimativa de probabilidade
     prob_calculada = 0.85
     favorito = time_casa
     return favorito, prob_calculada
 
-async def consultar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def buscar_e_enviar_sinais(context: ContextTypes.DEFAULT_TYPE, data_str: str, rotulo_data: str):
     await context.bot.send_message(
         chat_id=CHAT_ID, 
-        text="🔎 Buscando partidas de futebol agendadas para hoje..."
+        text=f"🔎 Buscando partidas de futebol agendadas para {rotulo_data} ({data_str})..."
     )
 
-    # Formato correto exigido pela API: YYYYMMDD
-    hoje_compacto = datetime.now().strftime("%Y%m%d")
-    url_fixtures = f"https://free-api-live-football-data.p.rapidapi.com/football-get-matches-by-date?date={hoje_compacto}"
+    url_fixtures = f"https://free-api-live-football-data.p.rapidapi.com/football-get-matches-by-date?date={data_str}"
     
     try:
         response = requests.get(url_fixtures, headers=headers_api, timeout=12)
@@ -69,7 +66,7 @@ async def consultar(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not jogos_encontrados:
             await context.bot.send_message(
                 chat_id=CHAT_ID, 
-                text="⚠️ Nenhuma partida encontrada para a data de hoje."
+                text=f"⚠️ Nenhuma partida encontrada para a data de {rotulo_data}."
             )
             return
 
@@ -86,7 +83,7 @@ async def consultar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for partida in jogos_encontrados:
         jogos_processados += 1
 
-        # Filtra partidas que já encerraram ou foram canceladas
+        # Filtra partidas já finalizadas ou canceladas
         status_partida = str(partida.get("status", "")).lower()
         if any(termo in status_partida for termo in ["finished", "ft", "ended", "cancel", "postponed"]):
             continue
@@ -107,7 +104,7 @@ async def consultar(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if prob_estimada > 0.80 and prob_estimada > prob_implicita:
             sinais_encontrados += 1
             mensagem = (
-                f"🎯 *SINAL DE APOSTA IDENTIFICADO*\n\n"
+                f"🎯 *SINAL DE APOSTA IDENTIFICADO ({rotulo_data.upper()})*\n\n"
                 f"🏆 *Competição:* {nome_liga}\n"
                 f"⏰ *Horário:* {horario_jogo}\n"
                 f"⚽ *Jogo:* {time_casa} x {time_fora}\n"
@@ -125,18 +122,29 @@ async def consultar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if sinais_encontrados == 0:
         await context.bot.send_message(
             chat_id=CHAT_ID, 
-            text=f"Análise concluída em {jogos_processados} jogos de hoje. Nenhum jogo pendente com oportunidade +80% EV+ encontrada."
+            text=f"Análise concluída em {jogos_processados} jogos ({rotulo_data}). Nenhum jogo pendente com oportunidade +80% EV+ encontrada."
         )
 
+# --- COMANDOS DO TELEGRAM ---
+async def consultar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    hoje_compacto = datetime.now().strftime("%Y%m%d")
+    await buscar_e_enviar_sinais(context, hoje_compacto, "hoje")
+
+async def amanha(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    amanha_compacto = (datetime.now() + timedelta(days=1)).strftime("%Y%m%d")
+    await buscar_e_enviar_sinais(context, amanha_compacto, "amanhã")
+
 def main():
-    # Inicia o servidor web secundário em uma thread paralela
     server_thread = Thread(target=run_web_server)
     server_thread.daemon = True
     server_thread.start()
 
-    # Inicia o bot do Telegram
     app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
+    
+    # Registra os dois comandos
     app.add_handler(CommandHandler("consultar", consultar))
+    app.add_handler(CommandHandler("amanha", amanha))
+    
     print("Bot rodando com sucesso...")
     app.run_polling()
 
