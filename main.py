@@ -1,4 +1,5 @@
 import os
+import time
 import requests
 from threading import Thread
 from flask import Flask
@@ -28,30 +29,35 @@ headers_api = {
     "X-RapidAPI-Host": "free-api-live-football-data.p.rapidapi.com"
 }
 
+# CACHE SIMPLES PARA EVITAR REQUISITION LIMITS NA API
+cache_times = {}
+
 # --- FUNÇÃO DE ANÁLISE ESTATÍSTICA REAL ---
 def calcular_desempenho_time(time_id):
     """
     Busca as últimas partidas do time na API para calcular a taxa real de vitórias recentes.
+    Utiliza cache simples para evitar exceder o limite de requisições.
     """
     if not time_id:
         return 0.50
 
+    if time_id in cache_times:
+        return cache_times[time_id]
+
     url_historico = f"https://free-api-live-football-data.p.rapidapi.com/football-get-team-all-matches?teamid={time_id}"
     
     try:
-        response = requests.get(url_historico, headers=headers_api, timeout=8)
+        # Respeitar limite de requisições da API
+        time.sleep(0.1) 
+        response = requests.get(url_historico, headers=headers_api, timeout=6)
         if response.status_code != 200:
             return 0.50
             
         dados = response.json()
-        
-        # Tenta capturar a lista de partidas do time
         response_obj = dados.get("response", {})
         jogos = response_obj.get("matches", []) if isinstance(response_obj, dict) else []
         
-        # Pega no máximo os últimos 5 jogos
         jogos_recentes = jogos[:5]
-        
         if not jogos_recentes:
             return 0.50
 
@@ -65,7 +71,6 @@ def calcular_desempenho_time(time_id):
             else:
                 status_str = str(status_info).lower()
 
-            # Pega apenas jogos já encerrados
             if any(termo in status_str for termo in ["finished", "ft", "ended"]):
                 total_jogos += 1
                 home_obj = jogo.get("home", {})
@@ -81,19 +86,21 @@ def calcular_desempenho_time(time_id):
                 elif not eh_mandante and gols_fora > gols_casa:
                     vitorias += 1
 
-        return (vitorias / total_jogos) if total_jogos > 0 else 0.50
+        taxa = (vitorias / total_jogos) if total_jogos > 0 else 0.50
+        cache_times[time_id] = taxa
+        return taxa
 
     except Exception:
         return 0.50
 
 def estimar_probabilidade_vitoria(time_casa_id, time_fora_id, nome_casa, nome_fora):
     """
-    Compara o aproveitamento real dos dois times para calcular quem é o favorito.
+    Compara o aproveitamento dos dois times para determinar quem é o favorito e a % estimada.
     """
     taxa_casa = calcular_desempenho_time(time_casa_id)
     taxa_fora = calcular_desempenho_time(time_fora_id)
 
-    # Bônus leve de mandante (+5% de vantagem para o time da casa)
+    # Bônus de mandante (+5%)
     taxa_casa_ajustada = taxa_casa + 0.05
 
     total = taxa_casa_ajustada + taxa_fora
@@ -108,11 +115,11 @@ def estimar_probabilidade_vitoria(time_casa_id, time_fora_id, nome_casa, nome_fo
     else:
         return nome_fora, prob_fora
 
-# --- BUSCA E ENVIO DE SINAIS ---
+# --- BUSCA E ENVIO DOS TOP 10 SINAIS ---
 async def buscar_e_enviar_sinais(context: ContextTypes.DEFAULT_TYPE, data_str: str, rotulo_data: str):
     await context.bot.send_message(
         chat_id=CHAT_ID, 
-        text=f"🔎 Buscando e analisando partidas de futebol para {rotulo_data} ({data_str})..."
+        text=f"🔎 Analisando todas as partidas de {rotulo_data} ({data_str}) para mapear os 10 mais prováveis..."
     )
 
     url_fixtures = f"https://free-api-live-football-data.p.rapidapi.com/football-get-matches-by-date?date={data_str}"
@@ -128,7 +135,6 @@ async def buscar_e_enviar_sinais(context: ContextTypes.DEFAULT_TYPE, data_str: s
             return
 
         data = response.json()
-        
         if not isinstance(data, dict) or data.get("status") != "success":
             await context.bot.send_message(
                 chat_id=CHAT_ID, 
@@ -153,20 +159,16 @@ async def buscar_e_enviar_sinais(context: ContextTypes.DEFAULT_TYPE, data_str: s
         )
         return
 
-    sinais_encontrados = 0
-    jogos_processados = 0
+    candidatos_sinais = []
 
     for partida in jogos_encontrados:
-        jogos_processados += 1
-
-        # Tratamento de status
         status_info = partida.get("status", {})
         if isinstance(status_info, dict):
             status_str = str(status_info.get("reason", {}).get("short", "")).lower() or str(status_info.get("type", "")).lower()
         else:
             status_str = str(status_info).lower()
 
-        # Descarta partidas finalizadas ou canceladas
+        # Descarta partidas encerradas ou canceladas
         if any(termo in status_str for termo in ["finished", "ft", "ended", "canceled", "postponed"]):
             continue
 
@@ -182,37 +184,62 @@ async def buscar_e_enviar_sinais(context: ContextTypes.DEFAULT_TYPE, data_str: s
         nome_liga = partida.get("leagueName", partida.get("league", {}).get("name", "Liga Geral"))
         horario_jogo = partida.get("time", "Horário a definir")
 
-        # Chama o cálculo real baseado no histórico
         favorito, prob_estimada = estimar_probabilidade_vitoria(
             time_casa_id, time_fora_id, time_casa, time_fora
         )
 
-        odd_mercado = 1.22 
+        # Odd padrão/estimada do mercado se não houver odd em tempo real
+        odd_mercado = 1.35 
         prob_implicita = 1 / odd_mercado
 
-        # Filtro rigoroso: apenas probabilidades reais > 80%
-        if prob_estimada > 0.80 and prob_estimada > prob_implicita:
-            sinais_encontrados += 1
-            mensagem = (
-                f"🎯 *SINAL DE APOSTA IDENTIFICADO ({rotulo_data.upper()})*\n\n"
-                f"🏆 *Competição:* {nome_liga}\n"
-                f"⏰ *Horário:* {horario_jogo}\n"
-                f"⚽ *Jogo:* {time_casa} x {time_fora}\n"
-                f"⭐️ *Favorito Estimado:* {favorito}\n"
-                f"📈 *Probabilidade Real Estimada:* {prob_estimada * 100:.1f}%\n"
-                f"📊 *Odd do Mercado:* {odd_mercado:.2f} (Implícita: {prob_implicita * 100:.1f}%)\n\n"
-                f"✅ *Critério:* Desempenho recente verificado (+80% de probabilidade real)."
-            )
-            await context.bot.send_message(
-                chat_id=CHAT_ID, 
-                text=mensagem, 
-                parse_mode="Markdown"
-            )
+        # Considera apenas jogos onde a probabilidade calculada supera a odd do mercado
+        diferenca_valor = prob_estimada - prob_implicita
 
-    if sinais_encontrados == 0:
+        if diferenca_valor > 0:
+            candidatos_sinais.append({
+                'liga': nome_liga,
+                'horario': horario_jogo,
+                'jogo': f"{time_casa} x {time_fora}",
+                'favorito': favorito,
+                'prob_estimada': prob_estimada,
+                'odd_mercado': odd_mercado,
+                'prob_implicita': prob_implicita,
+                'diferenca': diferenca_valor
+            })
+
+    if not candidatos_sinais:
         await context.bot.send_message(
             chat_id=CHAT_ID, 
-            text=f"Análise concluída em {jogos_processados} jogos ({rotulo_data}). Nenhum jogo pendente atendeu aos critérios de +80% de probabilidade real."
+            text=f"Nenhum jogo com valor estimado acima da odd de mercado foi encontrado para {rotulo_data}."
+        )
+        return
+
+    # Ordena os jogos do maior para o menor valor estimado/probabilidade
+    candidatos_sinais.sort(key=lambda x: x['prob_estimada'], reverse=True)
+
+    # Seleciona os Top 10 mais prováveis
+    top_10 = candidatos_sinais[:10]
+
+    await context.bot.send_message(
+        chat_id=CHAT_ID, 
+        text=f"🔥 *TOP {len(top_10)} JOGOS MAIS PROVÁVEIS ({rotulo_data.upper()})*",
+        parse_mode="Markdown"
+    )
+
+    for idx, jogo in enumerate(top_10, 1):
+        mensagem = (
+            f"🎯 *# {idx} MAIS PROVÁVEL*\n"
+            f"🏆 *Competição:* {jogo['liga']}\n"
+            f"⏰ *Horário:* {jogo['horario']}\n"
+            f"⚽ *Jogo:* {jogo['jogo']}\n"
+            f"⭐️ *Favorito:* {jogo['favorito']}\n"
+            f"📈 *Probabilidade Estimada:* {jogo['prob_estimada'] * 100:.1f}%\n"
+            f"📊 *Odd do Mercado:* {jogo['odd_mercado']:.2f} (Implícita: {jogo['prob_implicita'] * 100:.1f}%)\n"
+        )
+        await context.bot.send_message(
+            chat_id=CHAT_ID, 
+            text=mensagem, 
+            parse_mode="Markdown"
         )
 
 # --- COMANDOS DO TELEGRAM ---
