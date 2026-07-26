@@ -2,7 +2,6 @@ import os
 import requests
 from threading import Thread
 from flask import Flask
-from datetime import datetime
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
@@ -10,7 +9,7 @@ web_app = Flask(__name__)
 
 @web_app.route('/')
 def home():
-    return "Bot de Diagnóstico Online"
+    return "Bot de Teste Online"
 
 def run_web_server():
     port = int(os.environ.get("PORT", 10000))
@@ -26,20 +25,16 @@ headers_api = {
 }
 
 async def consultar(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    hoje = datetime.now().strftime("%Y-%m-%d")
-    
-    # 1. Teste no endpoint por data
-    url_teste = f"https://free-api-live-football-data.p.rapidapi.com/football-get-matches-by-date?date={hoje}"
+    # Testando o endpoint alternativo sem necessidade de passar parâmetro de data
+    url_teste = "https://free-api-live-football-data.p.rapidapi.com/football-current-matches"
     
     try:
         res = requests.get(url_teste, headers=headers_api, timeout=10)
         
-        # Envia no Telegram o status exato e os primeiros 1000 caracteres do JSON original
         msg_debug = (
-            f"🔍 *RESPOSTA BRUTA DA API*\n"
-            f"• **Status Code:** {res.status_code}\n"
-            f"• **URL Chamada:** `{url_teste}`\n\n"
-            f"• **Corpo da Resposta:**\n```json\n{res.text[:1000]}\n```"
+            f"🔍 *TESTE ENDPOINT ALTERNATIVO*\n"
+            f"• **Status Code:** {res.status_code}\n\n"
+            f"• **Resposta:**\n```json\n{res.text[:1000]}\n```"
         )
         
         await context.bot.send_message(
