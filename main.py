@@ -36,11 +36,12 @@ def estimar_probabilidade_vitoria(time_casa, time_fora):
 async def consultar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_message(
         chat_id=CHAT_ID, 
-        text="🔎 Testando resposta da API..."
+        text="🔎 Buscando partidas de futebol de hoje..."
     )
 
     hoje = datetime.now().strftime("%Y-%m-%d")
-    url_fixtures = f"https://free-api-live-football-data.p.rapidapi.com/football-get-all-matches-by-date?date={hoje}"
+    # URL corrigida com o endpoint correto da RapidAPI
+    url_fixtures = f"https://free-api-live-football-data.p.rapidapi.com/football-get-matches-by-date?date={hoje}"
     
     try:
         response = requests.get(url_fixtures, headers=headers_api, timeout=10)
@@ -53,20 +54,22 @@ async def consultar(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         data = response.json()
-        chaves_retornadas = list(data.keys()) if isinstance(data, dict) else type(data)
         
+        # Extrai a lista de jogos do formato nativo da API
         jogos_encontrados = []
         if isinstance(data, dict):
-            resp = data.get("response")
-            if isinstance(resp, list):
-                jogos_encontrados = resp
-            elif isinstance(resp, dict):
+            status_api = data.get("status")
+            resp = data.get("response", {})
+            
+            if isinstance(resp, dict):
                 jogos_encontrados = resp.get("matches", resp.get("list", []))
+            elif isinstance(resp, list):
+                jogos_encontrados = resp
 
         if not jogos_encontrados:
             await context.bot.send_message(
                 chat_id=CHAT_ID, 
-                text=f"⚠️ API respondeu 200 OK, mas a lista veio vazia.\nChaves do JSON: {chaves_retornadas}\nConteúdo parcial: {str(data)[:300]}"
+                text=f"⚠️ Nenhuma partida encontrada para a data de hoje ({hoje})."
             )
             return
 
@@ -113,7 +116,7 @@ async def consultar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if sinais_encontrados == 0:
         await context.bot.send_message(
             chat_id=CHAT_ID, 
-            text=f"Análise concluída em {jogos_processados} jogos do dia. Nenhuma oportunidade encontrada."
+            text=f"Análise concluída em {jogos_processados} jogos de hoje. Nenhuma oportunidade +80% EV+ encontrada."
         )
 
 def main():
@@ -128,3 +131,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    
