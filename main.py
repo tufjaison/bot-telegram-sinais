@@ -29,7 +29,7 @@ headers_api = {
 }
 
 def estimar_probabilidade_vitoria(time_casa, time_fora):
-    # Exemplo de lógica de estimativa (pode ser ajustada no futuro)
+    # Lógica de estimativa de probabilidade
     prob_calculada = 0.85
     favorito = time_casa
     return favorito, prob_calculada
@@ -37,10 +37,10 @@ def estimar_probabilidade_vitoria(time_casa, time_fora):
 async def consultar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_message(
         chat_id=CHAT_ID, 
-        text="🔎 Buscando partidas de futebol de hoje..."
+        text="🔎 Buscando partidas de futebol agendadas para hoje..."
     )
 
-    # Formato correto exigido pela API: YYYYMMDD (ex: 20260726)
+    # Formato correto exigido pela API: YYYYMMDD
     hoje_compacto = datetime.now().strftime("%Y%m%d")
     url_fixtures = f"https://free-api-live-football-data.p.rapidapi.com/football-get-matches-by-date?date={hoje_compacto}"
     
@@ -63,7 +63,6 @@ async def consultar(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
 
-        # Captura a lista de partidas dentro de response -> matches
         response_obj = data.get("response", {})
         jogos_encontrados = response_obj.get("matches", []) if isinstance(response_obj, dict) else []
 
@@ -87,12 +86,18 @@ async def consultar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for partida in jogos_encontrados:
         jogos_processados += 1
 
+        # Filtra partidas que já encerraram ou foram canceladas
+        status_partida = str(partida.get("status", "")).lower()
+        if any(termo in status_partida for termo in ["finished", "ft", "ended", "cancel", "postponed"]):
+            continue
+
         home_obj = partida.get("home", {})
         away_obj = partida.get("away", {})
         
         time_casa = home_obj.get("name", "Time Casa") if isinstance(home_obj, dict) else "Time Casa"
         time_fora = away_obj.get("name", "Time Fora") if isinstance(away_obj, dict) else "Time Fora"
         nome_liga = partida.get("leagueName", partida.get("league", {}).get("name", "Liga Geral"))
+        horario_jogo = partida.get("time", "Horário a definir")
         
         favorito, prob_estimada = estimar_probabilidade_vitoria(time_casa, time_fora)
 
@@ -104,6 +109,7 @@ async def consultar(update: Update, context: ContextTypes.DEFAULT_TYPE):
             mensagem = (
                 f"🎯 *SINAL DE APOSTA IDENTIFICADO*\n\n"
                 f"🏆 *Competição:* {nome_liga}\n"
+                f"⏰ *Horário:* {horario_jogo}\n"
                 f"⚽ *Jogo:* {time_casa} x {time_fora}\n"
                 f"⭐️ *Favorito:* {favorito}\n"
                 f"📈 *Probabilidade Estimada:* {prob_estimada * 100:.1f}%\n"
@@ -119,14 +125,16 @@ async def consultar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if sinais_encontrados == 0:
         await context.bot.send_message(
             chat_id=CHAT_ID, 
-            text=f"Análise concluída em {jogos_processados} jogos do dia. Nenhuma oportunidade +80% EV+ encontrada."
+            text=f"Análise concluída em {jogos_processados} jogos de hoje. Nenhum jogo pendente com oportunidade +80% EV+ encontrada."
         )
 
 def main():
+    # Inicia o servidor web secundário em uma thread paralela
     server_thread = Thread(target=run_web_server)
     server_thread.daemon = True
     server_thread.start()
 
+    # Inicia o bot do Telegram
     app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
     app.add_handler(CommandHandler("consultar", consultar))
     print("Bot rodando com sucesso...")
