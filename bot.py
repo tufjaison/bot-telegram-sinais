@@ -3,13 +3,14 @@ import re
 import pytesseract
 from PIL import Image
 from io import BytesIO
+from datetime import datetime
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 from config import TELEGRAM_TOKEN
 from analisador import buscar_com_fallback, extrair_jogos, avaliar, ajustar
 
 # ----------------------
-# Comando /start — opcional, mas mantido
+# Comando /start
 # ----------------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
@@ -22,8 +23,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 # ----------------------
-# FUNÇÃO PRINCIPAL — Aciona ao receber a IMAGEM
-# NÃO PRECISA DE /start ANTES
+# Processar imagem — SEM precisar de /start antes
 # ----------------------
 async def processar_imagem(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Mensagem imediata assim que a foto chega
@@ -32,7 +32,7 @@ async def processar_imagem(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🔍 Lendo o bilhete..."
     )
     
-    # Baixar imagem enviada
+    # Baixar imagem recebida
     foto = await update.message.photo[-1].get_file()
     arquivo = BytesIO()
     await foto.download_to_memory(arquivo)
@@ -44,7 +44,7 @@ async def processar_imagem(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         texto = pytesseract.image_to_string(imagem, lang='por')
     except:
-        texto = pytesseract.image_to_string(imagem)  # Fallback
+        texto = pytesseract.image_to_string(imagem)  # Fallback sem idioma
     
     if not texto.strip():
         await msg.edit_text(
@@ -148,16 +148,16 @@ async def processar_imagem(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(relatorio[i:i+3500])
 
 # ----------------------
-# Inicialização do Bot
+# Inicialização do Bot — Versão compatível 21.x
 # ----------------------
 def main():
+    print("🔄 Iniciando bot...")
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
     
     # Comandos
     app.add_handler(CommandHandler("start", start))
     
     # ⚡ A FUNÇÃO PRINCIPAL — ACIONA QUANDO ENVIAR FOTO
-    # NÃO PRECISA DE /start ANTES
     app.add_handler(MessageHandler(filters.PHOTO, processar_imagem))
     
     print("✅ Bot Online — Aguardando fotos...")
