@@ -1,0 +1,11 @@
+
+---
+
+## 📋 Arquivo 2: `requisitos.txt`
+
+```txt
+python-telegram-bot==20.7
+Pillow==10.4.0
+pytesseract==0.3.13
+requests==2.32.3
+python-dotenv==1.0.1
